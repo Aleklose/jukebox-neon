@@ -19,7 +19,7 @@ const THEME = {
   gradientGreen: ['#00FF94', '#00B8FF'], 
   gradientRed: ['#FF2E2E', '#A80000'], 
   gradientGold: ['#FFD700', '#FF8C00'],
-  gradientGray: ['#333', '#111'], // Para estado inactivo
+  gradientGray: ['#333', '#111'],
 };
 
 const WINNING_OPTIONS = [10, 25, 50, 100];
@@ -28,7 +28,7 @@ const ROOM_ID = 'fiesta-navidad';
 
 export default function App() {
   // --- IDENTIDAD LOCAL ---
-  const [myId, setMyId] = useState(null); // <--- AQUÍ GUARDAMOS QUIÉN ERES TÚ
+  const [myId, setMyId] = useState(null); 
   const [myName, setMyName] = useState('');
   const [songInput, setSongInput] = useState({ artist: '', title: '' });
   
@@ -70,10 +70,9 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- TIMER (Solo el DJ actual lo controla para evitar conflictos) ---
+  // --- TIMER ---
   useEffect(() => {
     let interval = null;
-    // Solo si soy el DJ y el timer está activo, yo envío la cuenta regresiva a la nube
     const iAmDj = players[djIndex]?.id === myId;
     
     if (activeTimer && timer > 0 && iAmDj) {
@@ -90,12 +89,10 @@ export default function App() {
   // --- ACCIONES ---
   const addPlayer = async () => {
     if (myName.trim()) {
-      // 1. Nos guardamos en Firebase
       const newPlayerRef = push(ref(database, `${ROOM_ID}/players`), { 
         name: myName, 
         score: 0 
       });
-      // 2. ¡IMPORTANTE! Guardamos nuestra "Cédula de Identidad" localmente
       setMyId(newPlayerRef.key); 
       setMyName('');
     }
@@ -170,7 +167,7 @@ export default function App() {
 
   const resetGame = () => {
     remove(ref(database, ROOM_ID)); 
-    setMyId(null); // Resetear identidad local
+    setMyId(null); 
   };
 
   const forceEndGame = () => {
@@ -201,10 +198,10 @@ export default function App() {
   
   // 1. LOBBY
   if (gameState === 'SETUP') {
-    // Si ya me registré, muestro pantalla de espera
     if (myId) {
       return (
         <MainLayout>
+          <EmergencyReset onReset={resetGame} /> 
           <Text style={styles.neonTitle}>LOBBY</Text>
           <Text style={styles.instruction}>Esperando jugadores...</Text>
           <GlassCard style={{marginTop: 20}}>
@@ -216,7 +213,6 @@ export default function App() {
               ))}
             </ScrollView>
           </GlassCard>
-          {/* Solo el anfitrión (el primero en la lista o cualquiera ya registrado) puede iniciar */}
           <NeonButton title="INICIAR FIESTA" onPress={startGame} style={styles.bigButton} />
         </MainLayout>
       );
@@ -224,6 +220,7 @@ export default function App() {
 
     return (
     <MainLayout>
+      <EmergencyReset onReset={resetGame} /> 
       <Text style={styles.neonTitle}>JUKEBOX</Text>
       <GlassCard style={{marginTop: 20}}>
         <TextInput 
@@ -236,7 +233,6 @@ export default function App() {
         <NeonButton title="ENTRAR" onPress={addPlayer} />
       </GlassCard>
       
-      {/* Selector de Puntos Visible para todos en setup */}
       <View style={{marginTop: 20, width: '100%'}}>
         <Text style={styles.sectionHeader}>META DE PUNTOS: {winningScore}</Text>
         <View style={{flexDirection: 'row', justifyContent: 'space-between', gap: 10}}>
@@ -255,18 +251,18 @@ export default function App() {
   );
   }
 
-  // 2. DJ SPOTLIGHT (CON RESTRICCIÓN)
+  // 2. DJ SPOTLIGHT
   if (gameState === 'DJ') {
     const currentDj = players[djIndex];
-    const isMyTurn = currentDj?.id === myId; // ¿SOY YO EL DJ?
+    const isMyTurn = currentDj?.id === myId; 
 
     return (
     <MainLayout showExit>
+      <EmergencyReset onReset={resetGame} /> 
       <Text style={styles.roleTitle}>TURNO DE DJ</Text>
       <Text style={styles.bigNeonName}>{currentDj?.name}</Text>
       
       {isMyTurn ? (
-        // --- VISTA PARA EL DJ (CONTROLES) ---
         <GlassCard style={{marginTop: 20, borderColor: THEME.cyan}}>
           <Text style={[styles.instruction, {marginBottom: 10, color: THEME.cyan}]}>TE TOCA: Elige canción secreta</Text>
           <TextInput 
@@ -286,7 +282,6 @@ export default function App() {
           <NeonButton title="¡DALE PLAY!" onPress={startRound} style={{marginTop: 10}} />
         </GlassCard>
       ) : (
-        // --- VISTA PARA LOS DEMÁS (ESPERA) ---
         <GlassCard style={{marginTop: 20}}>
            <Text style={{color: '#666', textAlign: 'center', fontSize: 18}}>
              🤫 El DJ está eligiendo...
@@ -297,18 +292,19 @@ export default function App() {
         </GlassCard>
       )}
 
-      <TouchableOpacity onPress={forceEndGame} style={styles.endGameBtn}><Text style={{color:'red'}}>X</Text></TouchableOpacity>
+      <TouchableOpacity onPress={forceEndGame} style={styles.endGameBtn}><Text style={{color:'red'}}>Terminar Juego</Text></TouchableOpacity>
     </MainLayout>
   );
   }
 
-  // 3. GUESSING (CON RESTRICCIÓN)
+  // 3. GUESSING
   if (gameState === 'GUESSING') {
     const currentDj = players[djIndex];
-    const isMyTurn = currentDj?.id === myId; // Solo el DJ puede parar el timer
+    const isMyTurn = currentDj?.id === myId; 
 
     return (
     <MainLayout showExit>
+      <EmergencyReset onReset={resetGame} /> 
       <View style={styles.timerContainer}>
          <LinearGradient colors={timer < 10 ? THEME.gradientRed : THEME.gradientPrimary} style={styles.timerCircle}>
             <View style={styles.timerInner}>
@@ -330,13 +326,14 @@ export default function App() {
   );
   }
 
-  // 4. SCORING (CON RESTRICCIÓN)
+  // 4. SCORING (AQUÍ ESTÁN TUS CAMBIOS DE TEXTO)
   if (gameState === 'SCORING') {
     const currentDj = players[djIndex];
-    const isMyTurn = currentDj?.id === myId; // Solo el DJ califica
+    const isMyTurn = currentDj?.id === myId; 
 
     return (
     <MainLayout showExit>
+      <EmergencyReset onReset={resetGame} /> 
       <Text style={styles.neonTitle}>RESULTADOS</Text>
       
       <GlassCard style={{marginVertical: 15, padding: 15}}>
@@ -347,7 +344,6 @@ export default function App() {
 
       <ScrollView style={{width: '100%', flex: 1}}>
         {isMyTurn ? (
-            // --- VISTA DJ (BOTONES ACTIVOS) ---
             <>
                 <Text style={styles.sectionHeader}>TOCA QUIEN ADIVINÓ:</Text>
                 {players.map((p, i) => (
@@ -363,11 +359,20 @@ export default function App() {
                 )
                 ))}
                 <Text style={[styles.sectionHeader, {marginTop: 20}]}>O CALIFÍCATE A TI:</Text>
-                <NeonButton title="BUENA ROLA (+2)" colors={THEME.gradientGreen} onPress={() => handleScore('GOOD_SONG')} style={{marginBottom: 10}}/>
-                <NeonButton title="MALA ROLA (-2)" colors={THEME.gradientRed} onPress={() => handleScore('BAD_SONG')}/>
+                {/* --- AQUI ESTAN LOS CAMBIOS DE TEXTO --- */}
+                <NeonButton 
+                    title="GANA EL DJ (+2 pts)" 
+                    colors={THEME.gradientGreen} 
+                    onPress={() => handleScore('GOOD_SONG')} 
+                    style={{marginBottom: 10}}
+                />
+                <NeonButton 
+                    title="PIERDE EL DJ (-2 pts)" 
+                    colors={THEME.gradientRed} 
+                    onPress={() => handleScore('BAD_SONG')}
+                />
             </>
         ) : (
-            // --- VISTA PÚBLICO (SOLO VER) ---
             <>
                 <Text style={styles.instruction}>El DJ está decidiendo los puntos...</Text>
                 {players.map((p) => (
@@ -390,6 +395,7 @@ export default function App() {
     const winner = players.sort((a,b) => b.score - a.score)[0];
     return (
       <MainLayout>
+        <EmergencyReset onReset={resetGame} /> 
         <Text style={styles.neonTitle}>¡CAMPEÓN!</Text>
         <Text style={styles.bigNeonName}>{winner?.name}</Text>
         <Text style={styles.neonSubtitle}>{winner?.score} PUNTOS</Text>
@@ -408,6 +414,33 @@ export default function App() {
   }
   return null;
 }
+
+// --- COMPONENTE DE EMERGENCIA (BOTE DE BASURA FLOTANTE) ---
+const EmergencyReset = ({ onReset }) => (
+  <TouchableOpacity 
+    onPress={() => {
+      if (confirm("⚠️ ¿REINICIAR TODO? \nSe borrarán todos los jugadores y el progreso.")) {
+        onReset();
+      }
+    }}
+    style={{
+      position: 'absolute',
+      top: 50,           
+      right: 20,         
+      backgroundColor: 'rgba(255, 0, 0, 0.4)', 
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 9999,      
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.3)'
+    }}
+  >
+    <Text style={{fontSize: 20}}>🔄</Text>
+  </TouchableOpacity>
+);
 
 // Layout Wrapper
 const MainLayout = ({children, showExit}) => (
