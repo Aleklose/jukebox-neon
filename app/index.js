@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
-import { Alert, ImageBackground, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ImageBackground, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'; // <--- AGREGADO LINKING
 
 // --- IMPORTAR FIREBASE ---
 import { get, onValue, push, ref, remove, set, update } from 'firebase/database';
@@ -20,6 +20,8 @@ const THEME = {
   gradientRed: ['#FF2E2E', '#A80000'], 
   gradientGold: ['#FFD700', '#FF8C00'],
   gradientGray: ['#333', '#111'],
+  spotify: ['#1DB954', '#191414'], // Color Spotify
+  youtube: ['#FF0000', '#282828'], // Color Youtube
 };
 
 const WINNING_OPTIONS = [10, 25, 50, 100];
@@ -177,11 +179,26 @@ export default function App() {
     ]);
   };
 
+  // --- NUEVA FUNCION DE MUSICA ---
+  const openMusicApp = (app) => {
+    const query = `${songInput.title} ${songInput.artist}`;
+    const encodedQuery = encodeURIComponent(query);
+
+    if (app === 'spotify') {
+        // Intenta abrir la app, si no web
+        const url = `https://open.spotify.com/search/${encodedQuery}`;
+        Linking.openURL(url);
+    } else if (app === 'youtube') {
+        const url = `https://www.youtube.com/results?search_query=${encodedQuery}`;
+        Linking.openURL(url);
+    }
+  };
+
   // --- UI COMPONENTS ---
-  const NeonButton = ({ title, onPress, colors = THEME.gradientPrimary, style, disabled }) => (
+  const NeonButton = ({ title, onPress, colors = THEME.gradientPrimary, style, disabled, icon }) => (
     <TouchableOpacity onPress={onPress} style={[styles.btnContainer, style, disabled && {opacity: 0.5}]} disabled={disabled}>
       <LinearGradient colors={disabled ? THEME.gradientGray : colors} start={{x:0, y:0}} end={{x:1, y:0}} style={styles.btnGradient}>
-        <Text style={[styles.btnText, disabled && {color: '#666'}]}>{title}</Text>
+        <Text style={[styles.btnText, disabled && {color: '#666'}]}>{icon ? icon + ' ' : ''}{title}</Text>
       </LinearGradient>
     </TouchableOpacity>
   );
@@ -251,7 +268,7 @@ export default function App() {
   );
   }
 
-  // 2. DJ SPOTLIGHT
+  // 2. DJ SPOTLIGHT (AQUI ESTÁN LOS BOTONES DE MUSICA)
   if (gameState === 'DJ') {
     const currentDj = players[djIndex];
     const isMyTurn = currentDj?.id === myId; 
@@ -267,18 +284,39 @@ export default function App() {
           <Text style={[styles.instruction, {marginBottom: 10, color: THEME.cyan}]}>TE TOCA: Elige canción secreta</Text>
           <TextInput 
             style={styles.input} 
-            placeholder="Canción" 
+            placeholder="Canción..." 
             placeholderTextColor="#555"
             value={songInput.title}
             onChangeText={(t) => setSongInput({...songInput, title: t})}
           />
           <TextInput 
             style={styles.input} 
-            placeholder="Artista" 
+            placeholder="Artista..." 
             placeholderTextColor="#555"
             value={songInput.artist}
             onChangeText={(t) => setSongInput({...songInput, artist: t})}
           />
+          
+          {/* --- BOTONES DE MUSICA (SOLO APARECEN SI ESCRIBES ALGO) --- */}
+          {(songInput.title.length > 0 || songInput.artist.length > 0) && (
+             <View style={{flexDirection: 'row', gap: 10, marginBottom: 15}}>
+                <NeonButton 
+                    title="Spotify" 
+                    icon="🟢"
+                    colors={THEME.spotify} 
+                    onPress={() => openMusicApp('spotify')} 
+                    style={{flex: 1, height: 40}}
+                />
+                <NeonButton 
+                    title="YouTube" 
+                    icon="🔴"
+                    colors={THEME.youtube} 
+                    onPress={() => openMusicApp('youtube')} 
+                    style={{flex: 1, height: 40}}
+                />
+             </View>
+          )}
+
           <NeonButton title="¡DALE PLAY!" onPress={startRound} style={{marginTop: 10}} />
         </GlassCard>
       ) : (
@@ -326,7 +364,7 @@ export default function App() {
   );
   }
 
-  // 4. SCORING (AQUÍ ESTÁN TUS CAMBIOS DE TEXTO)
+  // 4. SCORING 
   if (gameState === 'SCORING') {
     const currentDj = players[djIndex];
     const isMyTurn = currentDj?.id === myId; 
@@ -359,7 +397,7 @@ export default function App() {
                 )
                 ))}
                 <Text style={[styles.sectionHeader, {marginTop: 20}]}>O CALIFÍCATE A TI:</Text>
-                {/* --- AQUI ESTAN LOS CAMBIOS DE TEXTO --- */}
+                
                 <NeonButton 
                     title="GANA EL DJ (+2 pts)" 
                     colors={THEME.gradientGreen} 
@@ -415,7 +453,7 @@ export default function App() {
   return null;
 }
 
-// --- COMPONENTE DE EMERGENCIA (BOTE DE BASURA FLOTANTE) ---
+// --- COMPONENTE DE EMERGENCIA ---
 const EmergencyReset = ({ onReset }) => (
   <TouchableOpacity 
     onPress={() => {
