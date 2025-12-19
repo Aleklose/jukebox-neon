@@ -15,12 +15,12 @@ const THEME = {
   text: '#FFFFFF',
   cyan: '#00F0FF',
   pink: '#FF00AA',
-  purple: '#9D00FF', // Nuevo color para "Se rifó"
+  purple: '#9D00FF', 
   red: '#FF0000',
   gradientPrimary: ['#00F0FF', '#FF00AA'], 
   gradientGreen: ['#00FF94', '#00B8FF'], 
   gradientRed: ['#FF2E2E', '#A80000'], 
-  gradientPurple: ['#6C5CE7', '#a29bfe'], // Gradiente para "Se rifó"
+  gradientPurple: ['#6C5CE7', '#a29bfe'], 
   gradientGold: ['#FFD700', '#FF8C00'],
   gradientGray: ['#333', '#111'],
   spotify: ['#1DB954', '#191414'],
@@ -39,7 +39,7 @@ export default function App() {
   // Input del DJ
   const [songInput, setSongInput] = useState({ artist: '', title: '' });
   
-  // Input del JUGADOR (Ahora es objeto para doble validación)
+  // Input del JUGADOR
   const [myGuess, setMyGuess] = useState({ artist: '', title: '' }); 
   const [hasSubmitted, setHasSubmitted] = useState(false); 
   
@@ -98,11 +98,30 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeTimer, timer, myId, players, djIndex]);
 
+  // --- NUEVO: AUTO-AVANCE CUANDO TODOS ADIVINAN ---
+  useEffect(() => {
+      // Si estamos adivinando y hay respuestas
+      if (gameState === 'GUESSING' && guesses && players.length > 1) {
+          const numGuesses = Object.keys(guesses).length;
+          const numPlayersGuessing = players.length - 1; // Todos menos el DJ
+
+          // Si ya respondieron todos...
+          if (numGuesses >= numPlayersGuessing) {
+              const iAmDj = players[djIndex]?.id === myId;
+              // Solo el DJ (o el primero que lo detecte) manda la señal para evitar saturar la BD
+              if (iAmDj) {
+                  update(ref(database, ROOM_ID), { activeTimer: false, gameState: 'SCORING' });
+              }
+          }
+      }
+  }, [guesses, gameState, players, djIndex, myId]);
+
+
   // --- RESET LOCAL STATE AL CAMBIAR DE RONDAS ---
   useEffect(() => {
     if (gameState === 'GUESSING') {
         setHasSubmitted(false);
-        setMyGuess({ artist: '', title: '' }); // Resetear ambos inputs
+        setMyGuess({ artist: '', title: '' }); 
     }
   }, [gameState]);
 
@@ -151,14 +170,11 @@ export default function App() {
     update(ref(database, ROOM_ID), { activeTimer: false, gameState: 'SCORING' });
   };
 
-  // --- ENVIAR RESPUESTA (ACTUALIZADO) ---
+  // --- ENVIAR RESPUESTA ---
   const sendGuess = (type, data = null) => {
-      // type: 'GUESS' | 'RESPECT' (Se rifó) | 'KILL' (Maten al DJ)
-      
       let textContent = '';
       
       if (type === 'GUESS') {
-         // Formateamos la respuesta completa
          textContent = `${data.title} - ${data.artist}`;
       } else if (type === 'RESPECT') {
          textContent = '😎 Se rifó el DJ';
@@ -189,8 +205,8 @@ export default function App() {
        updates[`players/${playerKey}/score`] = winner.score + 1;
 
     } else if (type === 'DJ_BONUS') {
-       // "Se rifó el DJ" -> El DJ gana punto
-       updates[`players/${currentPlayer.id}/score`] = currentPlayer.score + 1;
+       // CORREGIDO: "Se rifó el DJ" -> El DJ gana 2 puntos
+       updates[`players/${currentPlayer.id}/score`] = currentPlayer.score + 2;
 
     } else if (type === 'DJ_PENALTY') {
        // "Maten al DJ" -> El DJ pierde 2 puntos
@@ -347,7 +363,7 @@ export default function App() {
   );
   }
 
-  // 3. GUESSING (ACTUALIZADO CON 2 INPUTS Y BOTONES NUEVOS)
+  // 3. GUESSING
   if (gameState === 'GUESSING') {
     const currentDj = players[djIndex];
     const isMyTurn = currentDj?.id === myId; 
@@ -382,7 +398,6 @@ export default function App() {
             <NeonButton title="¡STOP / YA GANARON!" colors={THEME.gradientRed} onPress={stopTimer} />
          </>
       ) : (
-         // VISTA DEL JUGADOR
          <GlassCard>
              {hasSubmitted ? (
                  <View style={{alignItems: 'center'}}>
@@ -394,7 +409,6 @@ export default function App() {
                  <>
                     <Text style={[styles.instruction, {marginBottom: 15}]}>¿Te la sabes?</Text>
                     
-                    {/* INPUT 1: CANCIÓN */}
                     <TextInput 
                         style={styles.input} 
                         placeholder="Nombre de la Canción..." 
@@ -403,7 +417,6 @@ export default function App() {
                         onChangeText={(t) => setMyGuess({...myGuess, title: t})}
                     />
                     
-                    {/* INPUT 2: ARTISTA (NUEVO) */}
                     <TextInput 
                         style={styles.input} 
                         placeholder="Artista / Banda..." 
@@ -421,17 +434,15 @@ export default function App() {
 
                     <View style={{flexDirection: 'row', gap: 10}}>
                         
-                        {/* BOTON A: SE RIFÓ EL DJ (NUEVO) */}
                         <TouchableOpacity 
                             style={[styles.voteBtn, {borderColor: THEME.purple, backgroundColor: 'rgba(108, 92, 231, 0.2)'}]}
                             onPress={() => sendGuess('RESPECT')}
                         >
                             <Text style={{fontSize: 20}}>😎</Text>
                             <Text style={{color: 'white', fontSize: 10, textAlign: 'center', fontWeight:'bold'}}>Se rifó el DJ</Text>
-                            <Text style={{color: '#aaa', fontSize: 8, textAlign: 'center'}}>(Gana 1 pt)</Text>
+                            <Text style={{color: '#aaa', fontSize: 8, textAlign: 'center'}}>(Gana 2 pts)</Text>
                         </TouchableOpacity>
 
-                         {/* BOTON B: MATEN AL DJ (NUEVO) */}
                          <TouchableOpacity 
                             style={[styles.voteBtn, {borderColor: THEME.red, backgroundColor: 'rgba(255, 0, 0, 0.1)'}]}
                             onPress={() => sendGuess('KILL')}
@@ -449,7 +460,7 @@ export default function App() {
   );
   }
 
-  // 4. SCORING (ACTUALIZADO CON BOTONES DE CASTIGO/BONUS)
+  // 4. SCORING
   if (gameState === 'SCORING') {
     const currentDj = players[djIndex];
     const isMyTurn = currentDj?.id === myId; 
@@ -495,9 +506,8 @@ export default function App() {
 
                 <Text style={[styles.sectionHeader, {marginTop: 20}]}>CALIFÍCATE A TI (DJ):</Text>
                 
-                {/* BOTONES DE AUTO-EVALUACION DEL DJ */}
                 <NeonButton 
-                    title="BONUS: SE RIFÓ (+1 pt)" 
+                    title="BONUS: SE RIFÓ (+2 pts)" 
                     colors={THEME.gradientPurple} 
                     onPress={() => handleScore('DJ_BONUS')} 
                     style={{marginBottom: 10}}
