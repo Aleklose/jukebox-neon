@@ -15,9 +15,12 @@ const THEME = {
   text: '#FFFFFF',
   cyan: '#00F0FF',
   pink: '#FF00AA',
+  purple: '#9D00FF', // Nuevo color para "Se rifó"
+  red: '#FF0000',
   gradientPrimary: ['#00F0FF', '#FF00AA'], 
   gradientGreen: ['#00FF94', '#00B8FF'], 
   gradientRed: ['#FF2E2E', '#A80000'], 
+  gradientPurple: ['#6C5CE7', '#a29bfe'], // Gradiente para "Se rifó"
   gradientGold: ['#FFD700', '#FF8C00'],
   gradientGray: ['#333', '#111'],
   spotify: ['#1DB954', '#191414'],
@@ -32,14 +35,18 @@ export default function App() {
   // --- IDENTIDAD LOCAL ---
   const [myId, setMyId] = useState(null); 
   const [myName, setMyName] = useState('');
+  
+  // Input del DJ
   const [songInput, setSongInput] = useState({ artist: '', title: '' });
-  const [myGuess, setMyGuess] = useState(''); // Lo que el usuario escribe para adivinar
-  const [hasSubmitted, setHasSubmitted] = useState(false); // Para bloquear si ya envió
+  
+  // Input del JUGADOR (Ahora es objeto para doble validación)
+  const [myGuess, setMyGuess] = useState({ artist: '', title: '' }); 
+  const [hasSubmitted, setHasSubmitted] = useState(false); 
   
   // Estados de Firebase
   const [gameState, setGameState] = useState('SETUP');
   const [players, setPlayers] = useState([]);
-  const [guesses, setGuesses] = useState({}); // Nuevo: Almacena las respuestas de la ronda
+  const [guesses, setGuesses] = useState({}); 
   const [winningScore, setWinningScore] = useState(50);
   const [djIndex, setDjIndex] = useState(0);
   const [timer, setTimer] = useState(45);
@@ -58,7 +65,7 @@ export default function App() {
         setTimer(data.timer || 45);
         setCurrentSong(data.currentSong || { artist: '', title: '' });
         setActiveTimer(data.activeTimer || false);
-        setGuesses(data.guesses || {}); // Escuchar respuestas
+        setGuesses(data.guesses || {}); 
         
         if (data.players) {
           const playersArray = Object.keys(data.players).map(key => ({
@@ -95,7 +102,7 @@ export default function App() {
   useEffect(() => {
     if (gameState === 'GUESSING') {
         setHasSubmitted(false);
-        setMyGuess('');
+        setMyGuess({ artist: '', title: '' }); // Resetear ambos inputs
     }
   }, [gameState]);
 
@@ -122,7 +129,7 @@ export default function App() {
     update(ref(database, ROOM_ID), { 
         gameState: 'DJ', 
         djIndex: randomDj,
-        guesses: null // Limpiar respuestas viejas
+        guesses: null 
     });
   };
 
@@ -130,7 +137,6 @@ export default function App() {
     if (!songInput.artist.trim() || !songInput.title.trim()) {
       return alert("¡Escribe la canción primero!");
     }
-    // Al iniciar ronda, borramos las respuestas anteriores (guesses: null)
     update(ref(database, ROOM_ID), { 
         currentSong: songInput,
         timer: 45,
@@ -145,20 +151,31 @@ export default function App() {
     update(ref(database, ROOM_ID), { activeTimer: false, gameState: 'SCORING' });
   };
 
-  // --- NUEVA FUNCION: ENVIAR RESPUESTA DEL JUGADOR ---
-  const sendGuess = (type, text = '') => {
-      // type: 'GUESS' | 'GOOD' | 'BAD'
+  // --- ENVIAR RESPUESTA (ACTUALIZADO) ---
+  const sendGuess = (type, data = null) => {
+      // type: 'GUESS' | 'RESPECT' (Se rifó) | 'KILL' (Maten al DJ)
+      
+      let textContent = '';
+      
+      if (type === 'GUESS') {
+         // Formateamos la respuesta completa
+         textContent = `${data.title} - ${data.artist}`;
+      } else if (type === 'RESPECT') {
+         textContent = '😎 Se rifó el DJ';
+      } else {
+         textContent = '🍅 Maten al DJ';
+      }
+
       const guessData = {
           playerId: myId,
           playerName: players.find(p => p.id === myId)?.name,
           type: type,
-          text: text,
+          text: textContent,
           timestamp: Date.now()
       };
       
-      // Guardamos la respuesta en la DB
       push(ref(database, `${ROOM_ID}/guesses`), guessData);
-      setHasSubmitted(true); // Bloqueamos al usuario localmente
+      setHasSubmitted(true); 
   };
 
 
@@ -167,11 +184,16 @@ export default function App() {
     const currentPlayer = players[djIndex];
     
     if (type === 'GUESSED' && playerKey) {
+       // El jugador adivinó -> Punto para el jugador
        const winner = players.find(p => p.id === playerKey);
        updates[`players/${playerKey}/score`] = winner.score + 1;
-    } else if (type === 'GOOD_SONG') {
-       updates[`players/${currentPlayer.id}/score`] = currentPlayer.score + 2;
-    } else if (type === 'BAD_SONG') {
+
+    } else if (type === 'DJ_BONUS') {
+       // "Se rifó el DJ" -> El DJ gana punto
+       updates[`players/${currentPlayer.id}/score`] = currentPlayer.score + 1;
+
+    } else if (type === 'DJ_PENALTY') {
+       // "Maten al DJ" -> El DJ pierde 2 puntos
        updates[`players/${currentPlayer.id}/score`] = currentPlayer.score - 2;
     }
 
@@ -241,7 +263,6 @@ export default function App() {
     </BlurView>
   );
 
-  // --- HELPER PARA MOSTRAR RESPUESTAS ---
   const getPlayerGuess = (pid) => {
       if (!guesses) return null;
       const guessArray = Object.values(guesses);
@@ -326,12 +347,11 @@ export default function App() {
   );
   }
 
-  // 3. GUESSING (AQUI ESTÁ EL CAMBIO FUERTE)
+  // 3. GUESSING (ACTUALIZADO CON 2 INPUTS Y BOTONES NUEVOS)
   if (gameState === 'GUESSING') {
     const currentDj = players[djIndex];
     const isMyTurn = currentDj?.id === myId; 
     
-    // Lista de respuestas ordenadas por tiempo
     const sortedGuesses = guesses ? Object.values(guesses).sort((a,b) => a.timestamp - b.timestamp) : [];
 
     return (
@@ -349,20 +369,20 @@ export default function App() {
          <>
             <Text style={styles.instruction}>RESPUESTAS EN VIVO:</Text>
             <ScrollView style={{maxHeight: 200, width: '100%', marginBottom: 20}}>
-                {sortedGuesses.length === 0 && <Text style={{color: '#666', textAlign: 'center'}}>Esperando...</Text>}
-                {sortedGuesses.map((g, i) => (
-                    <View key={i} style={styles.guessRow}>
-                        <Text style={{color: THEME.cyan, fontWeight: 'bold'}}>#{i+1} {g.playerName}</Text>
-                        <Text style={{color: 'white'}}>
-                            {g.type === 'GUESS' ? `📝 ${g.text}` : (g.type === 'GOOD' ? '🟢 Me Suena' : '🔴 No la topo')}
-                        </Text>
-                    </View>
-                ))}
+               {sortedGuesses.length === 0 && <Text style={{color: '#666', textAlign: 'center'}}>Esperando...</Text>}
+               {sortedGuesses.map((g, i) => (
+                  <View key={i} style={styles.guessRow}>
+                      <Text style={{color: THEME.cyan, fontWeight: 'bold'}}>#{i+1} {g.playerName}</Text>
+                      <Text style={{color: 'white'}}>
+                          {g.type === 'GUESS' ? `📝 ${g.text}` : (g.type === 'RESPECT' ? '😎 SE RIFÓ' : '🍅 MATEN AL DJ')}
+                      </Text>
+                  </View>
+               ))}
             </ScrollView>
             <NeonButton title="¡STOP / YA GANARON!" colors={THEME.gradientRed} onPress={stopTimer} />
          </>
       ) : (
-         // VISTA DEL JUGADOR (OPCIONES A, B, C)
+         // VISTA DEL JUGADOR
          <GlassCard>
              {hasSubmitted ? (
                  <View style={{alignItems: 'center'}}>
@@ -374,38 +394,51 @@ export default function App() {
                  <>
                     <Text style={[styles.instruction, {marginBottom: 15}]}>¿Te la sabes?</Text>
                     
-                    {/* OPCION C: INPUT */}
+                    {/* INPUT 1: CANCIÓN */}
                     <TextInput 
                         style={styles.input} 
-                        placeholder="Nombre de la canción..." 
+                        placeholder="Nombre de la Canción..." 
                         placeholderTextColor="#555"
-                        value={myGuess}
-                        onChangeText={setMyGuess}
+                        value={myGuess.title}
+                        onChangeText={(t) => setMyGuess({...myGuess, title: t})}
                     />
+                    
+                    {/* INPUT 2: ARTISTA (NUEVO) */}
+                    <TextInput 
+                        style={styles.input} 
+                        placeholder="Artista / Banda..." 
+                        placeholderTextColor="#555"
+                        value={myGuess.artist}
+                        onChangeText={(t) => setMyGuess({...myGuess, artist: t})}
+                    />
+
                     <NeonButton 
                         title="¡ME LA SÉ! (ENVIAR)" 
                         onPress={() => sendGuess('GUESS', myGuess)} 
-                        disabled={myGuess.trim().length === 0}
+                        disabled={!myGuess.title.trim() || !myGuess.artist.trim()}
                         style={{marginBottom: 20}}
                     />
 
                     <View style={{flexDirection: 'row', gap: 10}}>
-                        {/* OPCION B: ME SUENA */}
+                        
+                        {/* BOTON A: SE RIFÓ EL DJ (NUEVO) */}
                         <TouchableOpacity 
-                            style={[styles.voteBtn, {borderColor: THEME.cyan}]}
-                            onPress={() => sendGuess('GOOD')}
+                            style={[styles.voteBtn, {borderColor: THEME.purple, backgroundColor: 'rgba(108, 92, 231, 0.2)'}]}
+                            onPress={() => sendGuess('RESPECT')}
                         >
-                            <Text style={{fontSize: 20}}>🎵</Text>
-                            <Text style={{color: 'white', fontSize: 10, textAlign: 'center'}}>Me suena</Text>
+                            <Text style={{fontSize: 20}}>😎</Text>
+                            <Text style={{color: 'white', fontSize: 10, textAlign: 'center', fontWeight:'bold'}}>Se rifó el DJ</Text>
+                            <Text style={{color: '#aaa', fontSize: 8, textAlign: 'center'}}>(Gana 1 pt)</Text>
                         </TouchableOpacity>
 
-                         {/* OPCION A: NO LA TOPO */}
+                         {/* BOTON B: MATEN AL DJ (NUEVO) */}
                          <TouchableOpacity 
-                            style={[styles.voteBtn, {borderColor: '#FF2E2E'}]}
-                            onPress={() => sendGuess('BAD')}
+                            style={[styles.voteBtn, {borderColor: THEME.red, backgroundColor: 'rgba(255, 0, 0, 0.1)'}]}
+                            onPress={() => sendGuess('KILL')}
                         >
-                            <Text style={{fontSize: 20}}>👎</Text>
-                            <Text style={{color: 'white', fontSize: 10, textAlign: 'center'}}>No la topo</Text>
+                            <Text style={{fontSize: 20}}>🍅</Text>
+                            <Text style={{color: 'white', fontSize: 10, textAlign: 'center', fontWeight:'bold'}}>Maten al DJ</Text>
+                            <Text style={{color: '#aaa', fontSize: 8, textAlign: 'center'}}>(Castigo)</Text>
                         </TouchableOpacity>
                     </View>
                  </>
@@ -416,7 +449,7 @@ export default function App() {
   );
   }
 
-  // 4. SCORING (AQUI EL DJ VE QUIEN DIJO QUE)
+  // 4. SCORING (ACTUALIZADO CON BOTONES DE CASTIGO/BONUS)
   if (gameState === 'SCORING') {
     const currentDj = players[djIndex];
     const isMyTurn = currentDj?.id === myId; 
@@ -445,12 +478,11 @@ export default function App() {
                     <TouchableOpacity key={p.id} onPress={() => handleScore('GUESSED', p.id)}>
                     <LinearGradient colors={[THEME.bg, '#222']} style={styles.scorePill}>
                         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-                            <View>
+                            <View style={{flex: 1}}>
                                 <Text style={styles.playerText}>{p.name}</Text>
-                                {/* Muestra qué respondió este jugador */}
                                 {guess && (
-                                    <Text style={{color: guess.type === 'GUESS' ? THEME.cyan : '#888', fontSize: 12}}>
-                                        {guess.type === 'GUESS' ? `📝 Dijo: "${guess.text}"` : (guess.type === 'GOOD' ? '🎵 Le sonaba' : '👎 No la topó')}
+                                    <Text style={{color: guess.type === 'GUESS' ? THEME.cyan : (guess.type === 'RESPECT' ? THEME.purple : THEME.red), fontSize: 12}}>
+                                        {guess.type === 'GUESS' ? `📝 ${guess.text}` : (guess.type === 'RESPECT' ? '😎 Dijo: Se rifó el DJ' : '🍅 Dijo: Maten al DJ')}
                                     </Text>
                                 )}
                             </View>
@@ -461,9 +493,22 @@ export default function App() {
                   );
                 })}
 
-                <Text style={[styles.sectionHeader, {marginTop: 20}]}>O CALIFÍCATE A TI:</Text>
-                <NeonButton title="GANA EL DJ (+2 pts)" colors={THEME.gradientGreen} onPress={() => handleScore('GOOD_SONG')} style={{marginBottom: 10}}/>
-                <NeonButton title="PIERDE EL DJ (-2 pts)" colors={THEME.gradientRed} onPress={() => handleScore('BAD_SONG')}/>
+                <Text style={[styles.sectionHeader, {marginTop: 20}]}>CALIFÍCATE A TI (DJ):</Text>
+                
+                {/* BOTONES DE AUTO-EVALUACION DEL DJ */}
+                <NeonButton 
+                    title="BONUS: SE RIFÓ (+1 pt)" 
+                    colors={THEME.gradientPurple} 
+                    onPress={() => handleScore('DJ_BONUS')} 
+                    style={{marginBottom: 10}}
+                    icon="😎"
+                />
+                <NeonButton 
+                    title="CASTIGO: MATEN AL DJ (-2 pts)" 
+                    colors={THEME.gradientRed} 
+                    onPress={() => handleScore('DJ_PENALTY')}
+                    icon="🍅"
+                />
             </>
         ) : (
             <>
