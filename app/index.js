@@ -1,7 +1,7 @@
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
-import { Alert, ImageBackground, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'; // <--- AGREGADO LINKING
+import { Alert, ImageBackground, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 // --- IMPORTAR FIREBASE ---
 import { get, onValue, push, ref, remove, set, update } from 'firebase/database';
@@ -20,8 +20,8 @@ const THEME = {
   gradientRed: ['#FF2E2E', '#A80000'], 
   gradientGold: ['#FFD700', '#FF8C00'],
   gradientGray: ['#333', '#111'],
-  spotify: ['#1DB954', '#191414'], // Color Spotify
-  youtube: ['#FF0000', '#282828'], // Color Youtube
+  spotify: ['#1DB954', '#191414'],
+  youtube: ['#FF0000', '#282828'],
 };
 
 const WINNING_OPTIONS = [10, 25, 50, 100];
@@ -33,10 +33,13 @@ export default function App() {
   const [myId, setMyId] = useState(null); 
   const [myName, setMyName] = useState('');
   const [songInput, setSongInput] = useState({ artist: '', title: '' });
+  const [myGuess, setMyGuess] = useState(''); // Lo que el usuario escribe para adivinar
+  const [hasSubmitted, setHasSubmitted] = useState(false); // Para bloquear si ya envió
   
   // Estados de Firebase
   const [gameState, setGameState] = useState('SETUP');
   const [players, setPlayers] = useState([]);
+  const [guesses, setGuesses] = useState({}); // Nuevo: Almacena las respuestas de la ronda
   const [winningScore, setWinningScore] = useState(50);
   const [djIndex, setDjIndex] = useState(0);
   const [timer, setTimer] = useState(45);
@@ -55,6 +58,7 @@ export default function App() {
         setTimer(data.timer || 45);
         setCurrentSong(data.currentSong || { artist: '', title: '' });
         setActiveTimer(data.activeTimer || false);
+        setGuesses(data.guesses || {}); // Escuchar respuestas
         
         if (data.players) {
           const playersArray = Object.keys(data.players).map(key => ({
@@ -87,6 +91,14 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeTimer, timer, myId, players, djIndex]);
 
+  // --- RESET LOCAL STATE AL CAMBIAR DE RONDAS ---
+  useEffect(() => {
+    if (gameState === 'GUESSING') {
+        setHasSubmitted(false);
+        setMyGuess('');
+    }
+  }, [gameState]);
+
 
   // --- ACCIONES ---
   const addPlayer = async () => {
@@ -109,7 +121,8 @@ export default function App() {
     const randomDj = Math.floor(Math.random() * players.length);
     update(ref(database, ROOM_ID), { 
         gameState: 'DJ', 
-        djIndex: randomDj 
+        djIndex: randomDj,
+        guesses: null // Limpiar respuestas viejas
     });
   };
 
@@ -117,11 +130,13 @@ export default function App() {
     if (!songInput.artist.trim() || !songInput.title.trim()) {
       return alert("¡Escribe la canción primero!");
     }
+    // Al iniciar ronda, borramos las respuestas anteriores (guesses: null)
     update(ref(database, ROOM_ID), { 
         currentSong: songInput,
         timer: 45,
         activeTimer: true,
-        gameState: 'GUESSING'
+        gameState: 'GUESSING',
+        guesses: null 
     });
     setSongInput({ artist: '', title: '' });
   };
@@ -129,6 +144,23 @@ export default function App() {
   const stopTimer = () => {
     update(ref(database, ROOM_ID), { activeTimer: false, gameState: 'SCORING' });
   };
+
+  // --- NUEVA FUNCION: ENVIAR RESPUESTA DEL JUGADOR ---
+  const sendGuess = (type, text = '') => {
+      // type: 'GUESS' | 'GOOD' | 'BAD'
+      const guessData = {
+          playerId: myId,
+          playerName: players.find(p => p.id === myId)?.name,
+          type: type,
+          text: text,
+          timestamp: Date.now()
+      };
+      
+      // Guardamos la respuesta en la DB
+      push(ref(database, `${ROOM_ID}/guesses`), guessData);
+      setHasSubmitted(true); // Bloqueamos al usuario localmente
+  };
+
 
   const handleScore = (type, playerKey = null) => {
     const updates = {};
@@ -162,7 +194,8 @@ export default function App() {
         update(ref(database, ROOM_ID), { 
             gameState: 'DJ', 
             djIndex: nextDj,
-            currentSong: {artist: '', title: ''}
+            currentSong: {artist: '', title: ''},
+            guesses: null
         });
     }
   };
@@ -179,13 +212,10 @@ export default function App() {
     ]);
   };
 
-  // --- NUEVA FUNCION DE MUSICA ---
   const openMusicApp = (app) => {
     const query = `${songInput.title} ${songInput.artist}`;
     const encodedQuery = encodeURIComponent(query);
-
     if (app === 'spotify') {
-        // Intenta abrir la app, si no web
         const url = `https://open.spotify.com/search/${encodedQuery}`;
         Linking.openURL(url);
     } else if (app === 'youtube') {
@@ -198,7 +228,7 @@ export default function App() {
   const NeonButton = ({ title, onPress, colors = THEME.gradientPrimary, style, disabled, icon }) => (
     <TouchableOpacity onPress={onPress} style={[styles.btnContainer, style, disabled && {opacity: 0.5}]} disabled={disabled}>
       <LinearGradient colors={disabled ? THEME.gradientGray : colors} start={{x:0, y:0}} end={{x:1, y:0}} style={styles.btnGradient}>
-        <Text style={[styles.btnText, disabled && {color: '#666'}]}>{icon ? icon + ' ' : ''}{title}</Text>
+        <Text style={[styles.btnText, disabled && {color: '#ccc'}]}>{icon ? icon + ' ' : ''}{title}</Text>
       </LinearGradient>
     </TouchableOpacity>
   );
@@ -210,6 +240,13 @@ export default function App() {
       </View>
     </BlurView>
   );
+
+  // --- HELPER PARA MOSTRAR RESPUESTAS ---
+  const getPlayerGuess = (pid) => {
+      if (!guesses) return null;
+      const guessArray = Object.values(guesses);
+      return guessArray.find(g => g.playerId === pid);
+  };
 
   // --- PANTALLAS ---
   
@@ -234,31 +271,19 @@ export default function App() {
         </MainLayout>
       );
     }
-
     return (
     <MainLayout>
       <EmergencyReset onReset={resetGame} /> 
       <Text style={styles.neonTitle}>JUKEBOX</Text>
       <GlassCard style={{marginTop: 20}}>
-        <TextInput 
-          style={styles.input} 
-          placeholder="Tu Nombre..." 
-          placeholderTextColor="#666"
-          value={myName}
-          onChangeText={setMyName}
-        />
+        <TextInput style={styles.input} placeholder="Tu Nombre..." placeholderTextColor="#666" value={myName} onChangeText={setMyName} />
         <NeonButton title="ENTRAR" onPress={addPlayer} />
       </GlassCard>
-      
       <View style={{marginTop: 20, width: '100%'}}>
         <Text style={styles.sectionHeader}>META DE PUNTOS: {winningScore}</Text>
         <View style={{flexDirection: 'row', justifyContent: 'space-between', gap: 10}}>
           {WINNING_OPTIONS.map(score => (
-             <TouchableOpacity 
-                key={score} 
-                onPress={() => updateWinningScore(score)}
-                style={[styles.scoreOption, winningScore === score && styles.scoreOptionSelected]}
-             >
+             <TouchableOpacity key={score} onPress={() => updateWinningScore(score)} style={[styles.scoreOption, winningScore === score && styles.scoreOptionSelected]}>
                 <Text style={[styles.scoreOptionText, winningScore === score && {color: 'black', fontWeight: 'bold'}]}>{score}</Text>
              </TouchableOpacity>
           ))}
@@ -268,77 +293,46 @@ export default function App() {
   );
   }
 
-  // 2. DJ SPOTLIGHT (AQUI ESTÁN LOS BOTONES DE MUSICA)
+  // 2. DJ SPOTLIGHT
   if (gameState === 'DJ') {
     const currentDj = players[djIndex];
     const isMyTurn = currentDj?.id === myId; 
-
     return (
     <MainLayout showExit>
       <EmergencyReset onReset={resetGame} /> 
       <Text style={styles.roleTitle}>TURNO DE DJ</Text>
       <Text style={styles.bigNeonName}>{currentDj?.name}</Text>
-      
       {isMyTurn ? (
         <GlassCard style={{marginTop: 20, borderColor: THEME.cyan}}>
           <Text style={[styles.instruction, {marginBottom: 10, color: THEME.cyan}]}>TE TOCA: Elige canción secreta</Text>
-          <TextInput 
-            style={styles.input} 
-            placeholder="Canción..." 
-            placeholderTextColor="#555"
-            value={songInput.title}
-            onChangeText={(t) => setSongInput({...songInput, title: t})}
-          />
-          <TextInput 
-            style={styles.input} 
-            placeholder="Artista..." 
-            placeholderTextColor="#555"
-            value={songInput.artist}
-            onChangeText={(t) => setSongInput({...songInput, artist: t})}
-          />
-          
-          {/* --- BOTONES DE MUSICA (SOLO APARECEN SI ESCRIBES ALGO) --- */}
+          <TextInput style={styles.input} placeholder="Canción..." placeholderTextColor="#555" value={songInput.title} onChangeText={(t) => setSongInput({...songInput, title: t})} />
+          <TextInput style={styles.input} placeholder="Artista..." placeholderTextColor="#555" value={songInput.artist} onChangeText={(t) => setSongInput({...songInput, artist: t})} />
           {(songInput.title.length > 0 || songInput.artist.length > 0) && (
              <View style={{flexDirection: 'row', gap: 10, marginBottom: 15}}>
-                <NeonButton 
-                    title="Spotify" 
-                    icon="🟢"
-                    colors={THEME.spotify} 
-                    onPress={() => openMusicApp('spotify')} 
-                    style={{flex: 1, height: 40}}
-                />
-                <NeonButton 
-                    title="YouTube" 
-                    icon="🔴"
-                    colors={THEME.youtube} 
-                    onPress={() => openMusicApp('youtube')} 
-                    style={{flex: 1, height: 40}}
-                />
+                <NeonButton title="Spotify" icon="🟢" colors={THEME.spotify} onPress={() => openMusicApp('spotify')} style={{flex: 1, height: 40}} />
+                <NeonButton title="YouTube" icon="🔴" colors={THEME.youtube} onPress={() => openMusicApp('youtube')} style={{flex: 1, height: 40}} />
              </View>
           )}
-
           <NeonButton title="¡DALE PLAY!" onPress={startRound} style={{marginTop: 10}} />
         </GlassCard>
       ) : (
         <GlassCard style={{marginTop: 20}}>
-           <Text style={{color: '#666', textAlign: 'center', fontSize: 18}}>
-             🤫 El DJ está eligiendo...
-           </Text>
-           <View style={{marginTop: 20, alignItems: 'center'}}>
-              <Text style={{fontSize: 40}}>💿</Text>
-           </View>
+           <Text style={{color: '#666', textAlign: 'center', fontSize: 18}}>🤫 El DJ está eligiendo...</Text>
+           <View style={{marginTop: 20, alignItems: 'center'}}><Text style={{fontSize: 40}}>💿</Text></View>
         </GlassCard>
       )}
-
       <TouchableOpacity onPress={forceEndGame} style={styles.endGameBtn}><Text style={{color:'red'}}>Terminar Juego</Text></TouchableOpacity>
     </MainLayout>
   );
   }
 
-  // 3. GUESSING
+  // 3. GUESSING (AQUI ESTÁ EL CAMBIO FUERTE)
   if (gameState === 'GUESSING') {
     const currentDj = players[djIndex];
     const isMyTurn = currentDj?.id === myId; 
+    
+    // Lista de respuestas ordenadas por tiempo
+    const sortedGuesses = guesses ? Object.values(guesses).sort((a,b) => a.timestamp - b.timestamp) : [];
 
     return (
     <MainLayout showExit>
@@ -352,19 +346,77 @@ export default function App() {
       </View>
       
       {isMyTurn ? (
-         <NeonButton 
-            title="¡STOP / ALGUIEN SABE!" 
-            colors={THEME.gradientRed}
-            onPress={stopTimer} 
-         />
+         <>
+            <Text style={styles.instruction}>RESPUESTAS EN VIVO:</Text>
+            <ScrollView style={{maxHeight: 200, width: '100%', marginBottom: 20}}>
+                {sortedGuesses.length === 0 && <Text style={{color: '#666', textAlign: 'center'}}>Esperando...</Text>}
+                {sortedGuesses.map((g, i) => (
+                    <View key={i} style={styles.guessRow}>
+                        <Text style={{color: THEME.cyan, fontWeight: 'bold'}}>#{i+1} {g.playerName}</Text>
+                        <Text style={{color: 'white'}}>
+                            {g.type === 'GUESS' ? `📝 ${g.text}` : (g.type === 'GOOD' ? '🟢 Me Suena' : '🔴 No la topo')}
+                        </Text>
+                    </View>
+                ))}
+            </ScrollView>
+            <NeonButton title="¡STOP / YA GANARON!" colors={THEME.gradientRed} onPress={stopTimer} />
+         </>
       ) : (
-         <Text style={styles.instruction}>¡Adivina el nombre!</Text>
+         // VISTA DEL JUGADOR (OPCIONES A, B, C)
+         <GlassCard>
+             {hasSubmitted ? (
+                 <View style={{alignItems: 'center'}}>
+                     <Text style={{fontSize: 40}}>✅</Text>
+                     <Text style={styles.instruction}>¡Respuesta Enviada!</Text>
+                     <Text style={{color: '#666', marginTop: 10}}>Espera a que el DJ decida.</Text>
+                 </View>
+             ) : (
+                 <>
+                    <Text style={[styles.instruction, {marginBottom: 15}]}>¿Te la sabes?</Text>
+                    
+                    {/* OPCION C: INPUT */}
+                    <TextInput 
+                        style={styles.input} 
+                        placeholder="Nombre de la canción..." 
+                        placeholderTextColor="#555"
+                        value={myGuess}
+                        onChangeText={setMyGuess}
+                    />
+                    <NeonButton 
+                        title="¡ME LA SÉ! (ENVIAR)" 
+                        onPress={() => sendGuess('GUESS', myGuess)} 
+                        disabled={myGuess.trim().length === 0}
+                        style={{marginBottom: 20}}
+                    />
+
+                    <View style={{flexDirection: 'row', gap: 10}}>
+                        {/* OPCION B: ME SUENA */}
+                        <TouchableOpacity 
+                            style={[styles.voteBtn, {borderColor: THEME.cyan}]}
+                            onPress={() => sendGuess('GOOD')}
+                        >
+                            <Text style={{fontSize: 20}}>🎵</Text>
+                            <Text style={{color: 'white', fontSize: 10, textAlign: 'center'}}>Me suena</Text>
+                        </TouchableOpacity>
+
+                         {/* OPCION A: NO LA TOPO */}
+                         <TouchableOpacity 
+                            style={[styles.voteBtn, {borderColor: '#FF2E2E'}]}
+                            onPress={() => sendGuess('BAD')}
+                        >
+                            <Text style={{fontSize: 20}}>👎</Text>
+                            <Text style={{color: 'white', fontSize: 10, textAlign: 'center'}}>No la topo</Text>
+                        </TouchableOpacity>
+                    </View>
+                 </>
+             )}
+         </GlassCard>
       )}
     </MainLayout>
   );
   }
 
-  // 4. SCORING 
+  // 4. SCORING (AQUI EL DJ VE QUIEN DIJO QUE)
   if (gameState === 'SCORING') {
     const currentDj = players[djIndex];
     const isMyTurn = currentDj?.id === myId; 
@@ -383,36 +435,39 @@ export default function App() {
       <ScrollView style={{width: '100%', flex: 1}}>
         {isMyTurn ? (
             <>
-                <Text style={styles.sectionHeader}>TOCA QUIEN ADIVINÓ:</Text>
-                {players.map((p, i) => (
-                i !== djIndex && (
+                <Text style={styles.sectionHeader}>¿QUIÉN ACERTÓ?</Text>
+                <Text style={{fontSize: 10, color: '#666', textAlign: 'center', marginBottom: 10}}>(Toca al ganador)</Text>
+                
+                {players.map((p, i) => {
+                  if (i === djIndex) return null;
+                  const guess = getPlayerGuess(p.id);
+                  return (
                     <TouchableOpacity key={p.id} onPress={() => handleScore('GUESSED', p.id)}>
                     <LinearGradient colors={[THEME.bg, '#222']} style={styles.scorePill}>
                         <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-                            <Text style={styles.playerText}>🙋‍♂️ {p.name}</Text>
+                            <View>
+                                <Text style={styles.playerText}>{p.name}</Text>
+                                {/* Muestra qué respondió este jugador */}
+                                {guess && (
+                                    <Text style={{color: guess.type === 'GUESS' ? THEME.cyan : '#888', fontSize: 12}}>
+                                        {guess.type === 'GUESS' ? `📝 Dijo: "${guess.text}"` : (guess.type === 'GOOD' ? '🎵 Le sonaba' : '👎 No la topó')}
+                                    </Text>
+                                )}
+                            </View>
                             <Text style={styles.pillScore}>{p.score} pts</Text>
                         </View>
                     </LinearGradient>
                     </TouchableOpacity>
-                )
-                ))}
+                  );
+                })}
+
                 <Text style={[styles.sectionHeader, {marginTop: 20}]}>O CALIFÍCATE A TI:</Text>
-                
-                <NeonButton 
-                    title="GANA EL DJ (+2 pts)" 
-                    colors={THEME.gradientGreen} 
-                    onPress={() => handleScore('GOOD_SONG')} 
-                    style={{marginBottom: 10}}
-                />
-                <NeonButton 
-                    title="PIERDE EL DJ (-2 pts)" 
-                    colors={THEME.gradientRed} 
-                    onPress={() => handleScore('BAD_SONG')}
-                />
+                <NeonButton title="GANA EL DJ (+2 pts)" colors={THEME.gradientGreen} onPress={() => handleScore('GOOD_SONG')} style={{marginBottom: 10}}/>
+                <NeonButton title="PIERDE EL DJ (-2 pts)" colors={THEME.gradientRed} onPress={() => handleScore('BAD_SONG')}/>
             </>
         ) : (
             <>
-                <Text style={styles.instruction}>El DJ está decidiendo los puntos...</Text>
+                <Text style={styles.instruction}>El DJ está revisando respuestas...</Text>
                 {players.map((p) => (
                     <View key={p.id} style={styles.playerPill}>
                          <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
@@ -437,7 +492,6 @@ export default function App() {
         <Text style={styles.neonTitle}>¡CAMPEÓN!</Text>
         <Text style={styles.bigNeonName}>{winner?.name}</Text>
         <Text style={styles.neonSubtitle}>{winner?.score} PUNTOS</Text>
-
         <ScrollView style={{width: '100%', maxHeight: 200, marginVertical: 30}}>
              {players.map(p => (
                  <View key={p.id} style={styles.row}>
@@ -455,27 +509,7 @@ export default function App() {
 
 // --- COMPONENTE DE EMERGENCIA ---
 const EmergencyReset = ({ onReset }) => (
-  <TouchableOpacity 
-    onPress={() => {
-      if (confirm("⚠️ ¿REINICIAR TODO? \nSe borrarán todos los jugadores y el progreso.")) {
-        onReset();
-      }
-    }}
-    style={{
-      position: 'absolute',
-      top: 50,           
-      right: 20,         
-      backgroundColor: 'rgba(255, 0, 0, 0.4)', 
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      justifyContent: 'center',
-      alignItems: 'center',
-      zIndex: 9999,      
-      borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.3)'
-    }}
-  >
+  <TouchableOpacity onPress={() => { if (confirm("⚠️ ¿REINICIAR TODO?")) { onReset(); } }} style={{ position: 'absolute', top: 50, right: 20, backgroundColor: 'rgba(255, 0, 0, 0.4)', width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', zIndex: 9999, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' }}>
     <Text style={{fontSize: 20}}>🔄</Text>
   </TouchableOpacity>
 );
@@ -484,9 +518,7 @@ const EmergencyReset = ({ onReset }) => (
 const MainLayout = ({children, showExit}) => (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
       <ImageBackground source={{uri: BACKGROUND_IMAGE}} style={styles.bgImage} resizeMode="cover">
-          <BlurView intensity={90} tint="dark" style={styles.blurContainer}>
-              {children}
-          </BlurView>
+          <BlurView intensity={90} tint="dark" style={styles.blurContainer}>{children}</BlurView>
       </ImageBackground>
     </KeyboardAvoidingView>
 );
@@ -516,11 +548,13 @@ const styles = StyleSheet.create({
   btnGradient: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   btnText: { color: 'black', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
   bigButton: { marginTop: 30, height: 60 },
-  timerContainer: { alignItems: 'center', justifyContent: 'center', marginBottom: 40, marginTop: 40 },
-  timerCircle: { width: 200, height: 200, borderRadius: 100, padding: 3, justifyContent: 'center', alignItems: 'center' },
-  timerInner: { width: 180, height: 180, borderRadius: 90, backgroundColor: '#050505', justifyContent: 'center', alignItems: 'center' },
-  timerText: { color: 'white', fontSize: 70, fontWeight: 'bold' },
+  timerContainer: { alignItems: 'center', justifyContent: 'center', marginBottom: 20, marginTop: 20 },
+  timerCircle: { width: 150, height: 150, borderRadius: 100, padding: 3, justifyContent: 'center', alignItems: 'center' },
+  timerInner: { width: 130, height: 130, borderRadius: 90, backgroundColor: '#050505', justifyContent: 'center', alignItems: 'center' },
+  timerText: { color: 'white', fontSize: 50, fontWeight: 'bold' },
   scorePill: { padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#333', marginBottom: 8 },
   row: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, borderBottomWidth: 1, borderColor: '#333' },
   endGameBtn: { marginTop: 20, padding: 10 },
+  guessRow: { flexDirection: 'row', justifyContent: 'space-between', padding: 10, borderBottomWidth: 1, borderColor: '#333' },
+  voteBtn: { flex: 1, padding: 15, borderWidth: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.3)'}
 });
